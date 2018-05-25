@@ -3,6 +3,12 @@
 #include "Adafruit_MQTT.h"
 #include "Adafruit_MQTT_Client.h"
 
+#include <DNSServer.h>            //Local DNS Server used for redirecting all requests to the configuration portal
+#include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
+#include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
+
+WiFiManager wifiManager;
+
 #define WIFI_SSID "CamsBay"
 #define WIFI_PASS "randal5544"
 
@@ -10,6 +16,14 @@
 #define MQTT_PORT 1883
 #define MQTT_NAME "ORunt"
 #define MQTT_PASS "ee0c9164f35547eda9046b48ce5843ab"
+
+#define SERIAL_BAUDRATE   115200
+#define RELAY_PASSAGE   4
+#define RELAY_KITCHEN   5
+#define RELAY_LOUNGE    16
+const int  btn_passage = 14;
+const int  btn_kitchen = 12;
+const int  btn_lounge = 13;
 
 WiFiClient client;
 Adafruit_MQTT_Client mqtt(&client, MQTT_SERV, MQTT_PORT, MQTT_NAME, MQTT_PASS);
@@ -20,22 +34,23 @@ Adafruit_MQTT_Subscribe kitchen = Adafruit_MQTT_Subscribe(&mqtt, MQTT_NAME "/fee
 void MQTT_connect();
 
 void setup() {
-  Serial.begin(115200);
+  pinMode(RELAY_PASSAGE, OUTPUT);
+  pinMode(btn_passage, INPUT);
+  pinMode(RELAY_KITCHEN, OUTPUT);
+  pinMode(btn_kitchen, INPUT);
+  pinMode(RELAY_LOUNGE, OUTPUT);
+  pinMode(btn_lounge, INPUT);
   
-  //Connect to WiFi
-  Serial.print("\n\nConnecting Wifi... ");
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(500);
-    Serial.print(".");
-  }
+  digitalWrite(RELAY_PASSAGE, LOW);
+  digitalWrite(RELAY_KITCHEN, LOW);
+  digitalWrite(RELAY_LOUNGE, LOW);
+  
+  // Init serial port and clean garbage
+  Serial.begin(SERIAL_BAUDRATE);
 
-  Serial.println();
-
-  // Connected!
-  Serial.printf("[WIFI] STATION Mode, SSID: %s, IP address: %s\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+  // Wifi
+  wifiSetup();
+  
   mqtt.subscribe(&lounge);
   mqtt.subscribe(&passage);
   mqtt.subscribe(&kitchen);
@@ -53,15 +68,18 @@ void loop() {
   {
     if(subscription == &lounge){
       Serial.print("lounge: ");
-      Serial.println((char*) lounge.lastread);
+      Serial.print((char*) lounge.lastread);
+      SwitchRelay((char*) lounge.lastread, RELAY_LOUNGE);
     }
     else if (subscription == &passage){
       Serial.print("passage: ");
-      Serial.println((char*) passage.lastread);
+      Serial.print((char*) passage.lastread);
+      SwitchRelay((char*) passage.lastread, RELAY_PASSAGE);
     }
     else if (subscription == &kitchen){
       Serial.print("kitchen: ");
-      Serial.println((char*) kitchen.lastread);
+      Serial.print((char*) kitchen.lastread);
+      SwitchRelay((char*) kitchen.lastread, RELAY_KITCHEN);
     }
   }
 
@@ -100,3 +118,63 @@ void MQTT_connect()
   }
   Serial.println("MQTT Connected!\n");
 }
+
+void wifiman(){
+    WiFiManager wifiManager;
+    
+    if (!wifiManager.startConfigPortal("SharpTech0001")) {
+      Serial.println("failed to connect and hit timeout");
+      delay(3000);
+      //reset and try again, or maybe put it to deep sleep
+      ESP.reset();
+      delay(5000);
+    }
+    Serial.println("connected...yeey :)");
+}
+
+uint8_t CheckSetupPins(){
+  if (( digitalRead(btn_passage) == HIGH ) && (digitalRead(btn_lounge) == HIGH ))
+  {
+    delay(3000);
+    return ( digitalRead(btn_passage) == HIGH ) && (digitalRead(btn_lounge) == HIGH );
+  }
+  return 0;
+}
+
+void wifiSetup() {
+
+    // Set WIFI module to STA mode
+    WiFi.mode(WIFI_STA);
+
+    // Connect
+    Serial.printf("[WIFI] Trying to connect ");
+
+    // Wait
+    while (WiFi.status() != WL_CONNECTED) {
+        Serial.print(".");
+        if(CheckSetupPins()){
+          wifiman();
+        }
+        delay(100);
+    }
+    Serial.println();
+
+    // Connected!
+    Serial.printf("[WIFI] STATION Mode, SSID: %s, IP address: %s\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+}
+
+void SwitchRelay(char* state, int relay){
+  if (!strcmp(state, "on")){
+    digitalWrite(relay, HIGH);
+    Serial.println(" - Relay went on");
+  }
+  else if (!strcmp(state, "off")){
+    digitalWrite(relay, LOW);
+    Serial.println(" - Relay went off");
+  }
+  else{
+    Serial.print(" - Relay didn't trigger:");
+    Serial.println(state);
+  }
+}
+
