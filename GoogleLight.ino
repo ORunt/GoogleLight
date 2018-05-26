@@ -7,8 +7,6 @@
 #include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
 
-WiFiManager wifiManager;
-
 #define WIFI_SSID "CamsBay"
 #define WIFI_PASS "randal5544"
 
@@ -34,20 +32,19 @@ Adafruit_MQTT_Subscribe kitchen = Adafruit_MQTT_Subscribe(&mqtt, MQTT_NAME "/fee
 void MQTT_connect();
 
 void setup() {
+  Serial.begin(SERIAL_BAUDRATE);
+  
   pinMode(RELAY_PASSAGE, OUTPUT);
   pinMode(btn_passage, INPUT);
   pinMode(RELAY_KITCHEN, OUTPUT);
   pinMode(btn_kitchen, INPUT);
   pinMode(RELAY_LOUNGE, OUTPUT);
   pinMode(btn_lounge, INPUT);
-  
+
   digitalWrite(RELAY_PASSAGE, LOW);
   digitalWrite(RELAY_KITCHEN, LOW);
   digitalWrite(RELAY_LOUNGE, LOW);
   
-  // Init serial port and clean garbage
-  Serial.begin(SERIAL_BAUDRATE);
-
   // Wifi
   wifiSetup();
   
@@ -55,6 +52,10 @@ void setup() {
   mqtt.subscribe(&passage);
   mqtt.subscribe(&kitchen);
   Serial.printf("\nSubscribed\n\n");
+
+  attachInterrupt(digitalPinToInterrupt(btn_passage), handleInterruptPassage, RISING);
+  attachInterrupt(digitalPinToInterrupt(btn_kitchen), handleInterruptKitchen, RISING);
+  attachInterrupt(digitalPinToInterrupt(btn_lounge), handleInterruptLounge, RISING);
 }
 
 void loop() {
@@ -80,7 +81,7 @@ void loop() {
       Serial.print("kitchen: ");
       Serial.print((char*) kitchen.lastread);
       SwitchRelay((char*) kitchen.lastread, RELAY_KITCHEN);
-    }
+    } 
   }
 
   // ping the server to keep the mqtt connection alive
@@ -121,7 +122,7 @@ void MQTT_connect()
 
 void wifiman(){
     WiFiManager wifiManager;
-    
+    mqtt.disconnect();
     if (!wifiManager.startConfigPortal("SharpTech0001")) {
       Serial.println("failed to connect and hit timeout");
       delay(3000);
@@ -132,22 +133,18 @@ void wifiman(){
     Serial.println("connected...yeey :)");
 }
 
-uint8_t CheckSetupPins(){
-  if (( digitalRead(btn_passage) == HIGH ) && (digitalRead(btn_lounge) == HIGH ))
-  {
-    delay(3000);
-    return ( digitalRead(btn_passage) == HIGH ) && (digitalRead(btn_lounge) == HIGH );
+bool CheckSetupPins(){
+  if(( digitalRead(btn_passage) == HIGH ) && (digitalRead(btn_lounge) == HIGH )){
+    DelayMilli(2000);
+    return (( digitalRead(btn_passage) == HIGH ) && (digitalRead(btn_lounge) == HIGH ));
   }
-  return 0;
+  return false;
 }
 
 void wifiSetup() {
-
-    // Set WIFI module to STA mode
-    WiFi.mode(WIFI_STA);
-
     // Connect
     Serial.printf("[WIFI] Trying to connect ");
+    WiFi.begin(WIFI_SSID, WIFI_PASS); 
 
     // Wait
     while (WiFi.status() != WL_CONNECTED) {
@@ -176,5 +173,127 @@ void SwitchRelay(char* state, int relay){
     Serial.print(" - Relay didn't trigger:");
     Serial.println(state);
   }
+}
+
+void handleInterruptPassage(){
+  if(digitalRead(RELAY_PASSAGE))
+  {
+    digitalWrite(RELAY_PASSAGE, LOW);
+    Serial.print("passage off");
+  }
+  else
+  {
+    digitalWrite(RELAY_PASSAGE, HIGH);
+    Serial.print("passage on");
+  }
+  Serial.print("      Delay start... ");
+  DelayMilli(1000);
+  Serial.println("aaaand end");
+  if (CheckSetupPins()){
+    wifiman();
+  }
+}
+
+void handleInterruptKitchen(){
+  if(digitalRead(RELAY_KITCHEN))
+  {
+    digitalWrite(RELAY_KITCHEN, LOW);
+    Serial.print("kitchen off");
+  }
+  else
+  {
+    digitalWrite(RELAY_KITCHEN, HIGH);
+    Serial.print("kitchen on");
+  }
+  Serial.print("      Delay start... ");
+  DelayMilli(1000);
+  Serial.println("aaaand end");
+}
+
+void handleInterruptLounge(){
+  if(digitalRead(RELAY_LOUNGE))
+  {
+    digitalWrite(RELAY_LOUNGE, LOW);
+    Serial.print("lounge off");
+  }
+  else
+  {
+    digitalWrite(RELAY_LOUNGE, HIGH);
+    Serial.print("lounge on");
+  }
+  Serial.print("      Delay start... ");
+  DelayMilli(1000);
+  Serial.println("aaaand end");
+  if (CheckSetupPins()){
+    wifiman();
+  }
+}
+
+
+/*
+void handleInterrupt() {
+  Serial.println("Interrupt Triggered");
+  //mqtt.disconnect();
+  
+  if(digitalRead(btn_passage))
+  {
+    Serial.println("Entered Passage");
+    //if(CheckSetupPins()){
+      //wifiman();
+    //}
+    
+    if(digitalRead(RELAY_PASSAGE))
+    {
+      digitalWrite(RELAY_PASSAGE, LOW);
+      Serial.println("passage off");
+    }
+    else
+    {
+      digitalWrite(RELAY_PASSAGE, HIGH);
+      Serial.println("passage on");
+    }
+    delay(1000);
+  }
+  
+  if(digitalRead(btn_kitchen))
+  {
+    Serial.println("Entered Kitchen");
+    if(digitalRead(RELAY_KITCHEN))
+    {
+      digitalWrite(RELAY_KITCHEN, LOW);
+      Serial.println("kitchen off");
+    }
+    else
+    {
+      digitalWrite(RELAY_KITCHEN, HIGH);
+      Serial.println("kitchen on");
+    }
+    delay(1000);
+  }
+  
+  if(digitalRead(btn_lounge))
+  {
+    Serial.println("Entered Lounge");
+    //if(CheckSetupPins()){
+          //wifiman();
+        //}
+    if(digitalRead(RELAY_LOUNGE))
+    {
+      digitalWrite(RELAY_LOUNGE, LOW);
+      Serial.println("lounge off");
+    }
+    else
+    {
+      digitalWrite(RELAY_LOUNGE, HIGH);
+      Serial.println("lounge on");
+    }
+    delay(1000);
+  }
+}*/
+
+void DelayMilli(int milliseconds){
+  for (int i=0; i <= milliseconds; i++){
+      delayMicroseconds(1000);
+   }
 }
 
