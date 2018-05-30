@@ -7,6 +7,12 @@
 #include <ESP8266WebServer.h>     //Local WebServer used to serve the configuration portal
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager WiFi Configuration Magic
 
+
+/* ============ Settings ============ */
+#define AUTO_CONNECT_WIFI_MANAGER
+#define BUTTON_DELAY  400             // in milliseconds
+/* ========= End of settings ========*/
+
 #define WIFI_SSID "CamsBay"
 #define WIFI_PASS "randal5544"
 
@@ -19,9 +25,12 @@
 #define RELAY_PASSAGE   4
 #define RELAY_KITCHEN   5
 #define RELAY_LOUNGE    16
+#define CONFIG_LIGHT    2
 const int  btn_passage = 14;
 const int  btn_kitchen = 12;
 const int  btn_lounge = 13;
+
+bool trigger_wifi_manager = false;
 
 WiFiClient client;
 Adafruit_MQTT_Client mqtt(&client, MQTT_SERV, MQTT_PORT, MQTT_NAME, MQTT_PASS);
@@ -40,11 +49,18 @@ void setup() {
   pinMode(btn_kitchen, INPUT);
   pinMode(RELAY_LOUNGE, OUTPUT);
   pinMode(btn_lounge, INPUT);
+  pinMode(CONFIG_LIGHT, OUTPUT);
 
   digitalWrite(RELAY_PASSAGE, LOW);
   digitalWrite(RELAY_KITCHEN, LOW);
   digitalWrite(RELAY_LOUNGE, LOW);
+  digitalWrite(CONFIG_LIGHT, LOW);
   
+#ifdef AUTO_CONNECT_WIFI_MANAGER
+  attachInterrupt(digitalPinToInterrupt(btn_passage), handleInterruptPassage, RISING);
+  attachInterrupt(digitalPinToInterrupt(btn_kitchen), handleInterruptKitchen, RISING);
+  attachInterrupt(digitalPinToInterrupt(btn_lounge), handleInterruptLounge, RISING);
+#endif  
   // Wifi
   wifiSetup();
   
@@ -52,10 +68,12 @@ void setup() {
   mqtt.subscribe(&passage);
   mqtt.subscribe(&kitchen);
   Serial.printf("\nSubscribed\n\n");
-
+  
+#ifndef AUTO_CONNECT_WIFI_MANAGER
   attachInterrupt(digitalPinToInterrupt(btn_passage), handleInterruptPassage, RISING);
   attachInterrupt(digitalPinToInterrupt(btn_kitchen), handleInterruptKitchen, RISING);
   attachInterrupt(digitalPinToInterrupt(btn_lounge), handleInterruptLounge, RISING);
+#endif
 }
 
 void loop() {
@@ -83,11 +101,23 @@ void loop() {
       SwitchRelay((char*) kitchen.lastread, RELAY_KITCHEN);
     } 
   }
-
-  // ping the server to keep the mqtt connection alive
-  if (!mqtt.ping())
-  {
+#ifndef AUTO_CONNECT_WIFI_MANAGER
+  if (trigger_wifi_manager == true){
+    trigger_wifi_manager == false;
     mqtt.disconnect();
+    Serial.println("Intialising Wifi Manager");
+    wifiman();
+    Serial.println("Closing Wifi Manager");
+  }
+  else
+#endif
+  {
+    // ping the server to keep the mqtt connection alive
+    if (!mqtt.ping())
+    {
+      Serial.println("About to disconnect");
+      mqtt.disconnect();
+    }
   }
 }
 
@@ -102,27 +132,35 @@ void MQTT_connect()
   }
 
   Serial.print("Connecting to MQTT... ");
-
-  uint8_t retries = 3;
+  //uint8_t retries = 3;
+  uint8_t first_loop = 1;
   while ((ret = mqtt.connect()) != 0) // connect will return 0 for connected
   { 
+       if (first_loop == 1){
+         digitalWrite(CONFIG_LIGHT, HIGH);
+         Serial.println("Config light went on");
+         first_loop = 0;
+       }
        Serial.println(mqtt.connectErrorString(ret));
        Serial.println("Retrying MQTT connection in 5 seconds...");
        mqtt.disconnect();
        delay(5000);  // wait 5 seconds
-       retries--;
+       /*retries--;
        if (retries == 0) 
        {
          // basically die and wait for WDT to reset me
          while (1);
-       }
+       }*/
   }
+  
   Serial.println("MQTT Connected!\n");
+  digitalWrite(CONFIG_LIGHT, LOW);
+  Serial.println("Config light went off");
 }
 
+#ifndef AUTO_CONNECT_WIFI_MANAGER
 void wifiman(){
     WiFiManager wifiManager;
-    mqtt.disconnect();
     if (!wifiManager.startConfigPortal("SharpTech0001")) {
       Serial.println("failed to connect and hit timeout");
       delay(3000);
@@ -131,6 +169,10 @@ void wifiman(){
       delay(5000);
     }
     Serial.println("connected...yeey :)");
+    delay(3000);
+    //reset and try again, or maybe put it to deep sleep
+    ESP.reset();
+    delay(5000);
 }
 
 bool CheckSetupPins(){
@@ -140,27 +182,45 @@ bool CheckSetupPins(){
   }
   return false;
 }
+#endif
 
 void wifiSetup() {
-    // Connect
     Serial.printf("[WIFI] Trying to connect ");
-    WiFi.begin(WIFI_SSID, WIFI_PASS); 
+    
+#ifdef AUTO_CONNECT_WIFI_MANAGER    
+    WiFiManager wifiManager;
+    wifiManager.setConfigPortalTimeout(180);
+    wifiManager.setAPCallback(configModeCallback);
+    wifiManager.autoConnect("SharpTech0001");
+#endif    
 
     // Wait
     while (WiFi.status() != WL_CONNECTED) {
         Serial.print(".");
+#ifndef AUTO_CONNECT_WIFI_MANAGER
         if(CheckSetupPins()){
           wifiman();
         }
+#endif
         delay(100);
     }
     Serial.println();
-
+    digitalWrite(CONFIG_LIGHT, LOW);
+    Serial.println("Config light went off");
     // Connected!
     Serial.printf("[WIFI] STATION Mode, SSID: %s, IP address: %s\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
 }
 
+void configModeCallback(WiFiManager *myWiFiManger){
+  Serial.println("Mother sacking config call back");
+  Serial.println(WiFi.softAPIP());
+  Serial.println(myWiFiManger->getConfigPortalSSID());
+  digitalWrite(CONFIG_LIGHT, HIGH);
+  Serial.println("Config light went on");
+}
+
 void SwitchRelay(char* state, int relay){
+  
   if (!strcmp(state, "on")){
     digitalWrite(relay, HIGH);
     Serial.println(" - Relay went on");
@@ -173,6 +233,21 @@ void SwitchRelay(char* state, int relay){
     Serial.print(" - Relay didn't trigger:");
     Serial.println(state);
   }
+  /*
+  String state_str = String(state);
+  
+  if (state_str.indexOf("on") >= 0){
+    digitalWrite(relay, HIGH);
+    Serial.println(" - Relay went on");
+  }
+  else if (state_str.indexOf("off") >= 0){
+    digitalWrite(relay, LOW);
+    Serial.println(" - Relay went off");
+  }
+  else{
+    Serial.print(" - Relay didn't trigger:");
+    Serial.println(state);
+  }*/
 }
 
 void handleInterruptPassage(){
@@ -187,11 +262,13 @@ void handleInterruptPassage(){
     Serial.print("passage on");
   }
   Serial.print("      Delay start... ");
-  DelayMilli(1000);
+  DelayMilli(BUTTON_DELAY);
   Serial.println("aaaand end");
+#ifndef AUTO_CONNECT_WIFI_MANAGER
   if (CheckSetupPins()){
-    wifiman();
+    TriggerWifiManager();
   }
+#endif
 }
 
 void handleInterruptKitchen(){
@@ -206,7 +283,7 @@ void handleInterruptKitchen(){
     Serial.print("kitchen on");
   }
   Serial.print("      Delay start... ");
-  DelayMilli(1000);
+  DelayMilli(BUTTON_DELAY);
   Serial.println("aaaand end");
 }
 
@@ -222,14 +299,21 @@ void handleInterruptLounge(){
     Serial.print("lounge on");
   }
   Serial.print("      Delay start... ");
-  DelayMilli(1000);
+  DelayMilli(BUTTON_DELAY);
   Serial.println("aaaand end");
+#ifndef AUTO_CONNECT_WIFI_MANAGER
   if (CheckSetupPins()){
-    wifiman();
+    TriggerWifiManager();
   }
+#endif
 }
 
-
+#ifndef AUTO_CONNECT_WIFI_MANAGER
+void TriggerWifiManager(){
+  trigger_wifi_manager = true;
+  Serial.println("Wifi Manager Trigger Enabled");
+}
+#endif
 /*
 void handleInterrupt() {
   Serial.println("Interrupt Triggered");
