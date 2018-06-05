@@ -10,7 +10,7 @@
 
 /* ============ Settings ============ */
 #define AUTO_CONNECT_WIFI_MANAGER
-#define BUTTON_DELAY  400             // in milliseconds
+#define BUTTON_DELAY  1000             // in milliseconds
 /* ========= End of settings ========*/
 
 #define WIFI_SSID "CamsBay"
@@ -54,7 +54,7 @@ void setup() {
   digitalWrite(RELAY_PASSAGE, LOW);
   digitalWrite(RELAY_KITCHEN, LOW);
   digitalWrite(RELAY_LOUNGE, LOW);
-  digitalWrite(CONFIG_LIGHT, LOW);
+  analogWrite(CONFIG_LIGHT,0);
   
 #ifdef AUTO_CONNECT_WIFI_MANAGER
   attachInterrupt(digitalPinToInterrupt(btn_passage), handleInterruptPassage, RISING);
@@ -137,7 +137,7 @@ void MQTT_connect()
   while ((ret = mqtt.connect()) != 0) // connect will return 0 for connected
   { 
        if (first_loop == 1){
-         digitalWrite(CONFIG_LIGHT, HIGH);
+         analogWrite(CONFIG_LIGHT,200);
          Serial.println("Config light went on");
          first_loop = 0;
        }
@@ -154,7 +154,7 @@ void MQTT_connect()
   }
   
   Serial.println("MQTT Connected!\n");
-  digitalWrite(CONFIG_LIGHT, LOW);
+  analogWrite(CONFIG_LIGHT,0);
   Serial.println("Config light went off");
 }
 
@@ -192,6 +192,7 @@ void wifiSetup() {
     wifiManager.setConfigPortalTimeout(180);
     wifiManager.setAPCallback(configModeCallback);
     wifiManager.autoConnect("SharpTech0001");
+    analogWrite(CONFIG_LIGHT,200);
 #endif    
 
     // Wait
@@ -205,7 +206,7 @@ void wifiSetup() {
         delay(100);
     }
     Serial.println();
-    digitalWrite(CONFIG_LIGHT, LOW);
+    analogWrite(CONFIG_LIGHT,0);
     Serial.println("Config light went off");
     // Connected!
     Serial.printf("[WIFI] STATION Mode, SSID: %s, IP address: %s\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
@@ -215,12 +216,12 @@ void configModeCallback(WiFiManager *myWiFiManger){
   Serial.println("Mother sacking config call back");
   Serial.println(WiFi.softAPIP());
   Serial.println(myWiFiManger->getConfigPortalSSID());
-  digitalWrite(CONFIG_LIGHT, HIGH);
+  analogWrite(CONFIG_LIGHT,1024);
   Serial.println("Config light went on");
 }
 
 void SwitchRelay(char* state, int relay){
-  
+  /*
   if (!strcmp(state, "on")){
     digitalWrite(relay, HIGH);
     Serial.println(" - Relay went on");
@@ -232,8 +233,8 @@ void SwitchRelay(char* state, int relay){
   else{
     Serial.print(" - Relay didn't trigger:");
     Serial.println(state);
-  }
-  /*
+  }*/
+  
   String state_str = String(state);
   
   if (state_str.indexOf("on") >= 0){
@@ -247,7 +248,7 @@ void SwitchRelay(char* state, int relay){
   else{
     Serial.print(" - Relay didn't trigger:");
     Serial.println(state);
-  }*/
+  }
 }
 
 void handleInterruptPassage(){
